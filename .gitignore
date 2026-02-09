@@ -2,6 +2,7 @@
 /target/
 **/*.rs.bk
 *.pdb
+target/
 
 # Cargo lock (opcional, algunos proyectos lo incluyen)
 # Cargo.lock
@@ -33,3 +34,4 @@ temp/
 # Sistema
 .directory
 Thumbs.db
+target/
