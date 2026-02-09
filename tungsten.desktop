@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=Tungsten
+Comment=Tungsten Wayland Compositor - Lightweight compositor inspired by XFCE
+Exec=tungsten
+Type=Application
+DesktopNames=Tungsten

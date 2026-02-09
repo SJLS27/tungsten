@@ -1,0 +1,81 @@
+# Configuración de Tungsten Window Manager
+# Inspirado en XFCE para Wayland
+
+[general]
+# Tema del compositor
+theme = "default"
+# Animaciones habilitadas
+animations = true
+# Velocidad de animaciones (ms)
+animation_duration = 200
+# Composición habilitada
+compositing = true
+
+[keybindings]
+# Atajos de teclado estilo XFCE
+terminal = "Super+Return"
+launcher = "Super+Space"
+close_window = "Super+Q"
+fullscreen = "Super+F"
+maximize = "Super+M"
+minimize = "Super+N"
+# Navegación entre espacios de trabajo
+workspace_next = "Super+Right"
+workspace_prev = "Super+Left"
+workspace_1 = "Super+1"
+workspace_2 = "Super+2"
+workspace_3 = "Super+3"
+workspace_4 = "Super+4"
+
+[workspaces]
+# Número de espacios de trabajo
+count = 4
+# Nombres de los espacios de trabajo
+names = ["Principal", "Trabajo", "Web", "Media"]
+
+[panel]
+# Panel superior habilitado
+enabled = true
+# Altura del panel en pixels
+height = 32
+# Posición del panel (top, bottom)
+position = "top"
+# Transparencia del panel (0.0 - 1.0)
+opacity = 0.9
+
+[window_management]
+# Borde de las ventanas en pixels
+border_width = 2
+# Color del borde activo (RGBA)
+active_border_color = [0.3, 0.5, 0.8, 1.0]
+# Color del borde inactivo (RGBA)
+inactive_border_color = [0.2, 0.2, 0.2, 0.6]
+# Espaciado entre ventanas (gaps)
+gaps_inner = 8
+gaps_outer = 4
+# Focus sigue al mouse
+focus_follows_mouse = false
+
+[decorations]
+# Decoraciones del lado del servidor
+server_side = true
+# Botones en la barra de título
+buttons = ["minimize", "maximize", "close"]
+# Altura de la barra de título
+titlebar_height = 28
+
+[effects]
+# Sombras de ventanas
+shadows = true
+# Desenfoque del fondo
+blur = false
+# Transparencia de ventanas inactivas
+inactive_opacity = 0.95
+
+[applications]
+# Terminal por defecto
+terminal = "foot"
+# Lanzador de aplicaciones
+launcher = "wofi --show drun"
+# Navegador de archivos
+file_manager = "thunar"

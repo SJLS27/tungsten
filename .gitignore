@@ -1,0 +1,35 @@
+# Archivos de compilación de Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Cargo lock (opcional, algunos proyectos lo incluyen)
+# Cargo.lock
+
+# Archivos de IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Archivos de configuración local
+config/local.toml
+*.local.toml
+
+# Logs
+*.log
+
+# Archivos temporales
+tmp/
+temp/
+*.tmp
+
+# Archivos de backup
+*.bak
+*.backup
+
+# Sistema
+.directory
+Thumbs.db
