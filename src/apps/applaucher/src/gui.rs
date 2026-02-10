@@ -2,6 +2,10 @@ use eframe::{egui, App, Frame, NativeOptions};
 use crate::desktop_parser::{DesktopApp, resolve_icon};
 use crate::search::filter_apps;
 use crate::launcher::launch_app;
+use std::collections::{HashMap, HashSet};
+use std::path::Path;
+use std::sync::mpsc::{channel, Receiver};
+use std::ffi::OsStr;
 
 // GUI logic for displaying and selecting applications
 pub fn run_gui(apps: Vec<DesktopApp>) {
@@ -9,7 +13,7 @@ pub fn run_gui(apps: Vec<DesktopApp>) {
     let _ = eframe::run_native(
         "App Launcher",
         options,
-        Box::new(|_cc| Box::new(AppLauncher::new(apps))),
+        Box::new(|cc| Box::new(AppLauncher::with_ctx(apps, cc))),
     );
 }
 
@@ -19,7 +23,9 @@ struct AppLauncher {
     filtered: Vec<usize>,
     selected: usize,
     selected_app: Option<usize>,
-    icon_cache: std::collections::HashMap<String, Option<egui::ImageData>>,
+    icon_cache: HashMap<String, egui::TextureHandle>,
+    missing_icons: HashSet<String>,
+    pending_rx: Option<Receiver<(String, egui::ColorImage)>>,
 }
 
 impl AppLauncher {
@@ -31,27 +37,128 @@ impl AppLauncher {
             filtered,
             selected: 0,
             selected_app: None,
-            icon_cache: std::collections::HashMap::new(),
+            icon_cache: HashMap::new(),
+            missing_icons: HashSet::new(),
+            pending_rx: None,
         }
     }
 
-    fn get_icon(&mut self, ctx: &egui::Context, icon_name: &Option<String>) -> Option<egui::TextureHandle> {
-        if let Some(name) = icon_name {
-            if let Some(Some(image)) = self.icon_cache.get(name) {
-                return Some(ctx.load_texture(name, image.clone(), egui::TextureOptions::default()));
-            }
-            if let Some(path) = resolve_icon(name) {
-                if let Ok(image) = image::open(&path) {
-                    // Resize the image to 25x25 pixels for consistent icon size
-                    let image = image.resize_exact(25, 25, image::imageops::FilterType::Lanczos3).to_rgba8();
-                    let size = [image.width() as usize, image.height() as usize];
-                    let pixels = image.into_vec();
-                    let img = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
-                    self.icon_cache.insert(name.clone(), Some(egui::ImageData::Color(img.clone().into())));
-                    return Some(ctx.load_texture(name, egui::ImageData::Color(img.into()), egui::TextureOptions::default()));
+    fn with_ctx(apps: Vec<DesktopApp>, cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = AppLauncher::new(apps);
+        // Spawn a background thread to decode images and send ColorImage to the UI thread
+        let (tx, rx) = channel();
+        let apps_for_thread = app.apps.clone();
+        std::thread::spawn(move || {
+            for a in apps_for_thread.iter() {
+                if let Some(icon_name) = a.icon.as_ref() {
+                    // Prefer the resolved path returned by parser; otherwise try resolve_icon
+                    let mut candidate_paths = Vec::new();
+                    if icon_name.contains('/') {
+                        candidate_paths.push(icon_name.clone());
+                    } else if let Some(resolved) = resolve_icon(icon_name) {
+                        candidate_paths.push(resolved);
+                    }
+                    for path in candidate_paths.iter() {
+                        if Path::new(path).exists() {
+                            // handle svg separately
+                            if path.ends_with(".svg") {
+                                if let Some(raster) = find_raster_sibling(path) {
+                                    if let Ok(img) = image::open(raster) {
+                                        let img = img.resize_exact(25, 25, image::imageops::FilterType::Lanczos3).to_rgba8();
+                                        let size = [img.width() as usize, img.height() as usize];
+                                        let pixels = img.into_vec();
+                                        let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                                        let _ = tx.send((icon_name.clone(), color_image));
+                                        break;
+                                    }
+                                }
+                            } else if let Ok(img) = image::open(path) {
+                                let img = img.resize_exact(25, 25, image::imageops::FilterType::Lanczos3).to_rgba8();
+                                let size = [img.width() as usize, img.height() as usize];
+                                let pixels = img.into_vec();
+                                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                                let _ = tx.send((icon_name.clone(), color_image));
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-            self.icon_cache.insert(name.clone(), None);
+        });
+        app.pending_rx = Some(rx);
+        // Optionally preload a few first icons synchronously to reduce initial blankness
+        let first_icon = app.apps.get(0).and_then(|a| a.icon.clone());
+        if let Some(name) = first_icon {
+            let _ = app.load_and_cache_icon(&cc.egui_ctx, &name);
+        }
+        app
+    }
+
+    fn load_and_cache_icon(&mut self, ctx: &egui::Context, name: &str) -> Option<egui::TextureHandle> {
+        if self.icon_cache.contains_key(name) || self.missing_icons.contains(name) {
+            return self.icon_cache.get(name).cloned();
+        }
+        // If name looks like a path, try directly
+        let mut tried = Vec::new();
+        if name.contains('/') {
+            tried.push(name.to_string());
+        } else if let Some(resolved) = resolve_icon(name) {
+            tried.push(resolved);
+        }
+        for path in tried.iter() {
+            if Path::new(path).exists() {
+                // handle svg separately
+                if path.ends_with(".svg") {
+                    if let Some(raster) = find_raster_sibling(path) {
+                        if let Ok(img) = image::open(raster) {
+                            let img = img.resize_exact(25, 25, image::imageops::FilterType::Lanczos3).to_rgba8();
+                            let size = [img.width() as usize, img.height() as usize];
+                            let pixels = img.into_vec();
+                            let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                            let image_data = egui::ImageData::Color(color_image.into());
+                            let handle = ctx.load_texture(name, image_data, egui::TextureOptions::default());
+                            self.icon_cache.insert(name.to_string(), handle.clone());
+                            return Some(handle);
+                        }
+                    }
+                } else if let Ok(img) = image::open(path) {
+                    let img = img.resize_exact(25, 25, image::imageops::FilterType::Lanczos3).to_rgba8();
+                    let size = [img.width() as usize, img.height() as usize];
+                    let pixels = img.into_vec();
+                    let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                    let image_data = egui::ImageData::Color(color_image.into());
+                    let handle = ctx.load_texture(name, image_data, egui::TextureOptions::default());
+                    self.icon_cache.insert(name.to_string(), handle.clone());
+                    return Some(handle);
+                }
+            }
+        }
+        self.missing_icons.insert(name.to_string());
+        None
+    }
+
+    fn get_icon(&mut self, ctx: &egui::Context, icon_name_or_path: &Option<String>) -> Option<egui::TextureHandle> {
+        // Drain pending images sent by the background thread and create textures for them
+        if let Some(rx) = &self.pending_rx {
+            while let Ok((name, color_image)) = rx.try_recv() {
+                let image_data = egui::ImageData::Color(color_image.into());
+                let handle = ctx.load_texture(&name, image_data, egui::TextureOptions::default());
+                self.icon_cache.insert(name.clone(), handle);
+            }
+        }
+
+        if let Some(name) = icon_name_or_path {
+            if let Some(handle) = self.icon_cache.get(name) {
+                return Some(handle.clone());
+            }
+            if self.missing_icons.contains(name) {
+                return None;
+            }
+            // try to load now (runtime fallback)
+            if let Some(handle) = self.load_and_cache_icon(ctx, name) {
+                return Some(handle);
+            }
+            self.missing_icons.insert(name.clone());
         }
         None
     }
@@ -134,4 +241,19 @@ impl App for AppLauncher {
             }
         });
     }
+}
+
+fn find_raster_sibling(path: &str) -> Option<String> {
+    let p = Path::new(path);
+    if let Some(parent) = p.parent() {
+        if let Some(stem) = p.file_stem().and_then(OsStr::to_str) {
+            for ext in &["png", "xpm"] {
+                let candidate = parent.join(format!("{}.{}", stem, ext));
+                if candidate.exists() {
+                    if let Some(s) = candidate.to_str() { return Some(s.to_string()); }
+                }
+            }
+        }
+    }
+    None
 }
