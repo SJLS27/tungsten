@@ -3,6 +3,8 @@
 **/*.rs.bk
 *.pdb
 target/
+target/
+**/target/
 
 # Cargo lock (opcional, algunos proyectos lo incluyen)
 # Cargo.lock
